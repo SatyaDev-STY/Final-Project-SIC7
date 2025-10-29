@@ -1,90 +1,63 @@
 import streamlit as st
 import pandas as pd
-import time
-import paho.mqtt.client as mqtt
 import json
-import threading
+from paho.mqtt import client as mqtt
+import time
 
-# =============================
-# KONFIGURASI MQTT
-# =============================
-MQTT_BROKER = "test.mosquitto.org"     # Ganti sesuai broker kamu
-MQTT_PORT = 1883
-MQTT_TOPIC = "highvoltage/dahsboard"  # Ganti sesuai topic kamu
+# === KONFIGURASI MQTT ===
+BROKER = "test.mosquitto.org"  # ganti dengan IP broker lokal jika pakai lokal
+PORT = 1883
+TOPIC = "highvoltage/dashboard"
 
+# === KONFIGURASI STREAMLIT ===
 st.set_page_config(page_title="Monitoring Suhu & Kelembapan", layout="centered")
-
-st.title("🌡️ Sistem Monitoring Suhu & Kelembapan via MQTT")
+st.title("🌡️ Sistem Monitoring Suhu dan Kelembapan Ruangan")
 st.markdown("Dibuat oleh **Tim HighVoltage - MAN 2 Jakarta**")
 
-# =============================
-# INISIALISASI DATA
-# =============================
+# === DATA HISTORIS ===
 if "data" not in st.session_state:
     st.session_state.data = pd.DataFrame(columns=["Waktu", "Suhu", "Kelembapan"])
-if "last_data" not in st.session_state:
-    st.session_state.last_data = {"suhu": None, "kelembapan": None}
 
-# =============================
-# CALLBACK MQTT
-# =============================
+# === CALLBACK MQTT ===
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
-        suhu = float(payload.get("suhu", 0))
-        kelembapan = float(payload.get("kelembapan", 0))
+        suhu = payload["suhu"]
+        kelembapan = payload["kelembapan"]
         waktu = time.strftime("%H:%M:%S")
-
-        # Simpan ke session state
-        st.session_state.last_data = {"suhu": suhu, "kelembapan": kelembapan}
         st.session_state.data.loc[len(st.session_state.data)] = [waktu, suhu, kelembapan]
     except Exception as e:
-        print("Error parsing message:", e)
+        print(f"Error parsing data: {e}")
 
-# =============================
-# SETUP MQTT CLIENT (PAHO)
-# =============================
-def mqtt_thread():
-    client = mqtt.Client()
-    client.on_message = on_message
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.subscribe(MQTT_TOPIC)
-    client.loop_forever()
+# === KONEKSI KE BROKER ===
+client = mqtt.Client()
+client.on_message = on_message
+client.connect(BROKER, PORT, 60)
+client.subscribe(TOPIC)
+client.loop_start()
 
-# Jalankan MQTT client di thread terpisah
-thread = threading.Thread(target=mqtt_thread, daemon=True)
-thread.start()
-
-# =============================
-# STREAMLIT DASHBOARD
-# =============================
+# === TAMPILAN DASHBOARD ===
 placeholder = st.empty()
 
 while True:
-    suhu = st.session_state.last_data["suhu"]
-    kelembapan = st.session_state.last_data["kelembapan"]
-
     with placeholder.container():
-        if suhu is not None and kelembapan is not None:
+        if not st.session_state.data.empty:
+            suhu = st.session_state.data["Suhu"].iloc[-1]
+            kelembapan = st.session_state.data["Kelembapan"].iloc[-1]
+
             col1, col2 = st.columns(2)
             col1.metric("🌞 Suhu (°C)", f"{suhu:.1f}")
             col2.metric("💧 Kelembapan (%)", f"{kelembapan:.1f}")
 
-            # Status udara
             if kelembapan < 30:
-                st.error("🚨 Udara terlalu kering! Nyalakan humidifier 💧")
+                st.error("🚨 Udara terlalu kering!")
             elif kelembapan > 60:
-                st.warning("⚠️ Udara terlalu lembab! Gunakan dehumidifier ")
+                st.warning("⚠️ Udara terlalu lembab!")
             else:
-                st.success("✅ Udara normal dan sehat 🌿")
+                st.success("✅ Udara normal dan sehat")
 
-            # Grafik realtime
-            st.subheader("📈 Grafik Suhu & Kelembapan (Realtime)")
             st.line_chart(st.session_state.data.set_index("Waktu")[["Suhu", "Kelembapan"]])
         else:
-            st.warning("Menunggu data MQTT...")
+            st.info("Menunggu data dari ESP32...")
 
-        st.markdown("---")
-        st.caption("Data otomatis diperbarui setiap 5 detik")
-
-    time.sleep(5)
+        time.sleep(2)
