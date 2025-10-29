@@ -1,70 +1,81 @@
 import streamlit as st
 from paho.mqtt import client as mqtt
-import json
 import pandas as pd
+import json
 import time
 
 # === KONFIGURASI MQTT ===
-BROKER = "broker.hivemq.com"  # ganti jika pakai broker lokal
+BROKER = "broker.hivemq.com"
 PORT = 1883
 TOPIC = "highvoltage/dashboard"
 CLIENT_ID = "mqttx_4211c8fd"
 
-# === STREAMLIT CONFIG ===
+# === KONFIGURASI STREAMLIT ===
 st.set_page_config(page_title="Monitoring Suhu & Kelembapan", layout="centered")
 st.title("🌡️ Sistem Monitoring Suhu dan Kelembapan Ruangan")
 st.markdown("Dibuat oleh **Tim HighVoltage - MAN 2 Jakarta**")
 
-# === DATA HISTORIS ===
+# === INISIALISASI DATA ===
 if "data" not in st.session_state:
     st.session_state.data = pd.DataFrame(columns=["Waktu", "Suhu", "Kelembapan"])
 
-# === MQTT CALLBACK ===
+# === CALLBACK MQTT ===
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        st.session_state.connected = True
+        client.subscribe(TOPIC)
+        print("Terhubung ke broker MQTT dan subscribe ke topik:", TOPIC)
+    else:
+        print("Gagal terhubung ke broker, kode:", rc)
+
 def on_message(client, userdata, msg):
     try:
-        data = json.loads(msg.payload.decode())
-        suhu = data["suhu"]
-        kelembapan = data["kelembapan"]
+        payload = msg.payload.decode()
+        data = json.loads(payload)
+
+        suhu = float(data.get("suhu", 0))
+        kelembapan = float(data.get("kelembapan", 0))
         waktu = time.strftime("%H:%M:%S")
 
+        # Simpan ke DataFrame
         st.session_state.data.loc[len(st.session_state.data)] = [waktu, suhu, kelembapan]
-        st.session_state.suhu = suhu
-        st.session_state.kelembapan = kelembapan
+        st.session_state.latest_suhu = suhu
+        st.session_state.latest_kelembapan = kelembapan
+
     except Exception as e:
-        st.warning(f"Error parsing data: {e}")
+        print("Error parsing message:", e)
 
-# === KONEKSI MQTT ===
+# === SETUP CLIENT MQTT ===
 client = mqtt.Client(client_id=CLIENT_ID)
+client.on_connect = on_connect
 client.on_message = on_message
-client.connect(BROKER, PORT, 60)
-client.subscribe(TOPIC)
-client.loop_start()
 
-# === LOOP DASHBOARD ===
-placeholder = st.empty()
+try:
+    client.connect(BROKER, PORT, 60)
+    client.loop_start()
+except Exception as e:
+    st.error(f"Gagal terhubung ke broker MQTT: {e}")
 
-while True:
-    if "suhu" in st.session_state and "kelembapan" in st.session_state:
-        suhu = st.session_state.suhu
-        kelembapan = st.session_state.kelembapan
+# === TAMPILKAN DATA DI DASHBOARD ===
+if "latest_suhu" in st.session_state and "latest_kelembapan" in st.session_state:
+    suhu = st.session_state.latest_suhu
+    kelembapan = st.session_state.latest_kelembapan
 
-        with placeholder.container():
-            st.metric("🌞 Suhu (°C)", f"{suhu:.1f}")
-            st.metric("💧 Kelembapan (%)", f"{kelembapan:.1f}")
+    st.metric("🌞 Suhu (°C)", f"{suhu:.1f}")
+    st.metric("💧 Kelembapan (%)", f"{kelembapan:.1f}")
 
-            if kelembapan < 30:
-                st.error("🚨 Udara terlalu kering!")
-            elif kelembapan > 60:
-                st.warning("⚠️ Udara terlalu lembab!")
-            else:
-                st.success("✅ Udara normal dan sehat")
+    if kelembapan < 30:
+        st.error("🚨 Udara terlalu kering!")
+    elif kelembapan > 60:
+        st.warning("⚠️ Udara terlalu lembab!")
+    else:
+        st.success("✅ Udara normal dan sehat")
 
-            st.line_chart(st.session_state.data.set_index("Waktu")[["Suhu", "Kelembapan"]])
+    st.line_chart(st.session_state.data.set_index("Waktu")[["Suhu", "Kelembapan"]])
+else:
+    st.warning("Menunggu data dari ESP32...")
 
-    time.sleep(5)
-
-
-
-
-
-
+st.markdown("---")
+st.write("🔁 Data diperbarui otomatis setiap 5 detik")
+time.sleep(5)
+st.rerun()
