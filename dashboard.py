@@ -8,7 +8,7 @@ import time
 BROKER = "broker.hivemq.com"  # ganti jika pakai broker lokal
 PORT = 1883
 TOPIC = "highvoltage/dashboard"
-CLIENT_ID = "mqttx_dedef9dc"
+CLIENT_ID = "mqttx_4211c8fd"
 
 # === STREAMLIT CONFIG ===
 st.set_page_config(page_title="Monitoring Suhu & Kelembapan", layout="centered")
@@ -62,6 +62,7 @@ while True:
             st.line_chart(st.session_state.data.set_index("Waktu")[["Suhu", "Kelembapan"]])
 
     time.sleep(5)
+
 
 
 
